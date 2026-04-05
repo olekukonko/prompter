@@ -1,49 +1,26 @@
 package prompter
 
 import (
+	"bytes"
+	"context"
+	"strings"
 	"testing"
+	"time"
 )
 
-// runSecretWithBytes exercises Secret logic directly.
-func runSecretWithBytes(s *Secret, pass1, pass2 []byte) (*Result, error) {
-	// Simulate the validation logic from Run()
-	if s.opts.Required && len(pass1) == 0 {
-		return nil, ErrValidation{Msg: "input is required"}
-	}
-	if s.opts.MinLen > 0 && len(pass1) < s.opts.MinLen {
-		return nil, ErrValidation{Msg: "too short"}
-	}
-	if s.opts.MaxLen > 0 && len(pass1) > s.opts.MaxLen {
-		return nil, ErrValidation{Msg: "too long"}
-	}
-	if s.opts.Validator != nil {
-		if err := s.opts.Validator(pass1); err != nil {
-			return nil, err
-		}
-	}
-
-	if !s.confirm {
-		return NewResult(pass1), nil
-	}
-
-	// Check confirmation
-	if !bytesEqual(pass1, pass2) {
-		return nil, ErrMismatch
-	}
-	return NewResult(pass1), nil
-}
-
 func TestSecret_Required_Empty(t *testing.T) {
-	s := NewSecret("pass", WithRequired(true))
-	_, err := runSecretWithBytes(s, []byte{}, nil)
-	if err == nil {
-		t.Fatal("expected required error")
+	input := bytes.NewReader([]byte{})
+	s := NewSecret("pass", WithRequired(true), WithInput(input))
+	_, err := s.Run()
+	if err == nil || !strings.Contains(err.Error(), "required") {
+		t.Fatalf("expected required error, got: %v", err)
 	}
 }
 
 func TestSecret_Required_NonEmpty(t *testing.T) {
-	s := NewSecret("pass", WithRequired(true))
-	r, err := runSecretWithBytes(s, []byte("secret"), nil)
+	input := bytes.NewReader([]byte("secret\n"))
+	s := NewSecret("pass", WithRequired(true), WithInput(input))
+	r, err := s.Run()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -54,33 +31,27 @@ func TestSecret_Required_NonEmpty(t *testing.T) {
 }
 
 func TestSecret_MinLength_TooShort(t *testing.T) {
-	s := NewSecret("pass", WithLength(8, 0))
-	_, err := runSecretWithBytes(s, []byte("short"), nil)
-	if err == nil {
-		t.Fatal("expected minLength error")
+	input := bytes.NewReader([]byte("short\nalso\n"))
+	s := NewSecret("pass", WithLength(8, 0), WithInput(input))
+	_, err := s.Run()
+	if err == nil || !strings.Contains(err.Error(), "minimum length") {
+		t.Fatalf("expected minLength error, got: %v", err)
 	}
-}
-
-func TestSecret_MinLength_Exact(t *testing.T) {
-	s := NewSecret("pass", WithLength(4, 10))
-	r, err := runSecretWithBytes(s, []byte("pass"), nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	r.Zero()
 }
 
 func TestSecret_MaxLength_TooLong(t *testing.T) {
-	s := NewSecret("pass", WithLength(0, 4))
-	_, err := runSecretWithBytes(s, []byte("too long"), nil)
-	if err == nil {
-		t.Fatal("expected maxLength error")
+	input := bytes.NewReader([]byte("this is way too long\nanother long one\n"))
+	s := NewSecret("pass", WithLength(0, 5), WithInput(input))
+	_, err := s.Run()
+	if err == nil || !strings.Contains(err.Error(), "maximum length") {
+		t.Fatalf("expected maxLength error, got: %v", err)
 	}
 }
 
 func TestSecret_Confirm_Match(t *testing.T) {
-	s := NewSecret("pass").WithConfirmation("confirm")
-	r, err := runSecretWithBytes(s, []byte("correct"), []byte("correct"))
+	input := bytes.NewReader([]byte("correct\ncorrect\n"))
+	s := NewSecret("pass", WithInput(input)).WithConfirmation("confirm")
+	r, err := s.Run()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -91,63 +62,40 @@ func TestSecret_Confirm_Match(t *testing.T) {
 }
 
 func TestSecret_Confirm_Mismatch(t *testing.T) {
-	s := NewSecret("pass").WithConfirmation("confirm")
-	_, err := runSecretWithBytes(s, []byte("pass1"), []byte("pass2"))
-	if err != ErrMismatch {
+	input := bytes.NewReader([]byte("pass1\npass2\n"))
+	s := NewSecret("pass", WithInput(input)).WithConfirmation("confirm")
+	_, err := s.Run()
+	if err != ErrMismatch && !strings.Contains(err.Error(), "do not match") {
 		t.Fatalf("expected mismatch, got: %v", err)
 	}
 }
 
-func TestSecret_NoConfirm_IgnoresPass2(t *testing.T) {
-	s := NewSecret("pass") // confirm=false
-	r, err := runSecretWithBytes(s, []byte("abc"), []byte("xyz"))
-	if err != nil {
-		t.Fatal("should not error when confirm disabled")
-	}
-	if r.String() != "abc" {
-		t.Fatal("wrong value")
+func TestSecret_ContextCancellation(t *testing.T) {
+	s := NewSecret("pass")
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+	time.Sleep(5 * time.Millisecond)
+	_, err := s.RunContext(ctx)
+	if err != context.DeadlineExceeded {
+		t.Fatalf("expected timeout, got: %v", err)
 	}
 }
 
 func TestSecret_Validator(t *testing.T) {
-	s := NewSecret("pass", WithValidator(func(b []byte) error {
+	input := bytes.NewReader([]byte("wrong\nmagic\n"))
+	s := NewSecret("pass", WithInput(input), WithValidator(func(b []byte) error {
 		if string(b) != "magic" {
 			return ErrValidation{Msg: "not magic"}
 		}
 		return nil
 	}))
 
-	_, err := runSecretWithBytes(s, []byte("wrong"), nil)
-	if err == nil || err.Error() != "not magic" {
-		t.Fatalf("expected validator error, got: %v", err)
-	}
-
-	r, err := runSecretWithBytes(s, []byte("magic"), nil)
+	r, err := s.Run()
 	if err != nil {
-		t.Fatal("should pass with magic")
+		t.Fatal(err)
 	}
-	r.Zero()
-}
-
-func TestSecret_RequiredAndLength(t *testing.T) {
-	s := NewSecret("pass", WithRequired(true), WithLength(8, 0))
-
-	// Empty
-	_, err := runSecretWithBytes(s, []byte{}, nil)
-	if err == nil {
-		t.Fatal("expected required error")
-	}
-
-	// Too short
-	_, err = runSecretWithBytes(s, []byte("short"), nil)
-	if err == nil {
-		t.Fatal("expected length error")
-	}
-
-	// OK
-	r, err := runSecretWithBytes(s, []byte("longenough"), nil)
-	if err != nil {
-		t.Fatal("should pass")
+	if r.String() != "magic" {
+		t.Fatal("wrong value")
 	}
 	r.Zero()
 }

@@ -31,7 +31,6 @@ func TestResult_Zero(t *testing.T) {
 	if r.Len() != 0 {
 		t.Error("length should be 0")
 	}
-	// Safe to call twice
 	r.Zero()
 }
 
@@ -43,17 +42,15 @@ func TestResult_NilInput(t *testing.T) {
 	if r.String() != "" {
 		t.Error("string should be empty")
 	}
-	r.Zero() // Should not panic
+	r.Zero()
 }
 
 func TestResult_CopyOnCreate(t *testing.T) {
 	original := []byte("test")
 	r := NewResult(original)
 
-	// Modify original
 	original[0] = 'X'
 
-	// Result should be unchanged
 	if r.String() == "Xest" {
 		t.Error("Result should copy bytes, not reference them")
 	}

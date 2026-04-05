@@ -1,18 +1,24 @@
 package prompter
 
-import "errors"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+)
 
 var (
 	ErrMaxRetries = errors.New("maximum retry attempts exceeded")
 	ErrMismatch   = errors.New("values do not match")
+	ErrCancelled  = errors.New("input cancelled")
 )
 
 type ErrValidation struct{ Msg string }
 
 func (e ErrValidation) Error() string { return e.Msg }
 
-// Context gives formatters rich information for styling.
 type Context struct {
+	Ctx        context.Context
 	Prompt     string
 	Attempt    int
 	MaxRetries int
@@ -23,12 +29,8 @@ type Context struct {
 
 type Formatter func(ctx Context) string
 type Validator func(value []byte) error
-
-// EmptyHandler is called when secret input is empty (before confirmation).
-// Return true to proceed to confirmation, false to retry immediately.
 type EmptyHandler func() (proceedToConfirm bool)
 
-// Options holds configuration shared by Input and Secret.
 type Options struct {
 	Required      bool
 	MinLen        int
@@ -37,13 +39,16 @@ type Options struct {
 	Validator     Validator
 	Formatter     Formatter
 	ErrorCallback func(error)
-	LastError     error
+	Input         io.Reader
 }
 
-// DefaultFormatter is a simple plain-text formatter.
+// DefaultFormatter formats a prompt with attempt count on retry.
 func DefaultFormatter(ctx Context) string {
 	if ctx.IsRetry && ctx.LastError != nil {
-		return "[attempt %d/%d] %s: "
+		if ctx.MaxRetries > 0 {
+			return fmt.Sprintf("[attempt %d/%d] %s: ", ctx.Attempt, ctx.MaxRetries, ctx.Prompt)
+		}
+		return fmt.Sprintf("[attempt %d] %s: ", ctx.Attempt, ctx.Prompt)
 	}
-	return "%s: "
+	return fmt.Sprintf("%s: ", ctx.Prompt)
 }

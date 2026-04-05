@@ -1,11 +1,11 @@
 package prompter
 
 import (
+	"bytes"
 	"testing"
 )
 
 func TestOptions_Chaining(t *testing.T) {
-	// Test that all options can be chained and values stick
 	formatterCalled := false
 	validatorCalled := false
 	errCallbackCalled := false
@@ -40,7 +40,6 @@ func TestOptions_Chaining(t *testing.T) {
 		t.Error("Validator not set")
 	}
 
-	// Test callbacks work
 	opts.Validator([]byte("test"))
 	if !validatorCalled {
 		t.Error("Validator not called")
@@ -54,6 +53,15 @@ func TestOptions_Chaining(t *testing.T) {
 	opts.ErrorCallback(ErrValidation{Msg: "test"})
 	if !errCallbackCalled {
 		t.Error("ErrorCallback not called")
+	}
+}
+
+func TestOptions_WithInput(t *testing.T) {
+	input := bytes.NewReader([]byte("test\n"))
+	opts := Options{}
+	WithInput(input)(&opts)
+	if opts.Input != input {
+		t.Error("Input not set")
 	}
 }
 

@@ -1,6 +1,7 @@
 package prompter
 
-// Option configures shared input behavior.
+import "io"
+
 type Option func(*Options)
 
 // WithRequired fails on empty input.
@@ -31,4 +32,9 @@ func WithFormatter(f Formatter) Option {
 // WithErrorCallback is called on validation errors (for logging/styling).
 func WithErrorCallback(fn func(error)) Option {
 	return func(o *Options) { o.ErrorCallback = fn }
+}
+
+// WithInput overrides the default stdin reader.
+func WithInput(r io.Reader) Option {
+	return func(o *Options) { o.Input = r }
 }
