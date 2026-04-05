@@ -228,6 +228,10 @@ func (s *Secret) readFromReader(ctx Context) ([]byte, error) {
 		if buf[n] == '\n' {
 			break
 		}
+		if buf[n] == 3 { // ETX / Ctrl+C
+			zero.Bytes(buf)
+			return nil, ErrCancelled
+		}
 		if buf[n] == '\r' {
 			buf[n] = 0
 			continue
