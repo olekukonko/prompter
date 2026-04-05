@@ -8,7 +8,7 @@ import (
 
 func TestText_Required(t *testing.T) {
 	input := bytes.NewReader([]byte("\njohn\n"))
-	ti := NewTextInput("name", WithRequired(true), WithInput(input))
+	ti := NewInput("name", WithRequired(true), WithInput(input))
 	r, err := ti.Run()
 	if err != nil {
 		t.Fatal(err)
@@ -20,7 +20,7 @@ func TestText_Required(t *testing.T) {
 
 func TestText_Length(t *testing.T) {
 	input := bytes.NewReader([]byte("ab\nabcdef\nabcd\n"))
-	ti := NewTextInput("code", WithLength(3, 5), WithInput(input))
+	ti := NewInput("code", WithLength(3, 5), WithInput(input))
 	r, err := ti.Run()
 	if err != nil {
 		t.Fatal(err)
@@ -33,7 +33,7 @@ func TestText_Length(t *testing.T) {
 
 func TestText_NoValidation_AllowsEmpty(t *testing.T) {
 	input := bytes.NewReader([]byte("\n"))
-	ti := NewTextInput("optional", WithInput(input))
+	ti := NewInput("optional", WithInput(input))
 	r, err := ti.Run()
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func TestText_NoValidation_AllowsEmpty(t *testing.T) {
 }
 
 func TestText_ContextCancellation(t *testing.T) {
-	ti := NewTextInput("test")
+	ti := NewInput("test")
 	ctx, cancel := context.WithCancel(context.Background())
 
 	cancel()

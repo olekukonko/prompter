@@ -16,10 +16,10 @@ type Input struct {
 	reader io.Reader
 }
 
-// NewTextInput creates a plain-text prompt. Does NOT zero memory; avoid for secrets.
-func NewTextInput(prompt string, opts ...Option) *Input {
+// NewInput creates a plain-text prompt. Does NOT zero memory; avoid for secrets.
+func NewInput(prompt string, opts ...Option) *Input {
 	t := &Input{
-		prompt: prompt,
+		prompt: sanitize(prompt),
 		reader: os.Stdin,
 		opts: Options{
 			Formatter: DefaultFormatter,
@@ -42,6 +42,9 @@ func (t *Input) Run() (*Result, error) {
 // RunContext executes the text prompt, respecting context cancellation.
 // Note: cancellation is best-effort; the underlying read may block until the user acts.
 func (t *Input) RunContext(ctx context.Context) (*Result, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	type response struct {
 		val []byte
 		err error
@@ -49,7 +52,14 @@ func (t *Input) RunContext(ctx context.Context) (*Result, error) {
 	ch := make(chan response, 1)
 	go func() {
 		val, err := t.run(ctx)
-		ch <- response{val, err}
+		select {
+		case <-ctx.Done():
+			// val is non-secret but zero it anyway to keep the channel from retaining it
+			for i := range val {
+				val[i] = 0
+			}
+		case ch <- response{val, err}:
+		}
 	}()
 	select {
 	case <-ctx.Done():

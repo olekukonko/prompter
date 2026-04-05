@@ -74,7 +74,7 @@ func TestOptions_Defaults(t *testing.T) {
 		t.Error("should not be required by default")
 	}
 
-	ti := NewTextInput("test")
+	ti := NewInput("test")
 	if ti.opts.Formatter == nil {
 		t.Error("default formatter not set")
 	}

@@ -26,7 +26,7 @@ type Secret struct {
 // Default formatting adds "(hidden)" or "(confirm)" suffixes and shows attempt counts on retry.
 func NewSecret(prompt string, opts ...Option) *Secret {
 	s := &Secret{
-		prompt: prompt,
+		prompt: sanitize(prompt),
 		input:  os.Stdin,
 		opts: Options{
 			Formatter: func(ctx Context) string {
@@ -59,7 +59,7 @@ func NewSecret(prompt string, opts ...Option) *Secret {
 func (s *Secret) WithConfirmation(msg string) *Secret {
 	s.confirm = true
 	if msg != "" {
-		s.confirmMsg = msg
+		s.confirmMsg = sanitize(msg)
 	}
 	return s
 }
@@ -79,6 +79,9 @@ func (s *Secret) Run() (*Result, error) {
 // RunContext executes the secret prompt, respecting context cancellation.
 // Note: cancellation is best-effort; the underlying read may block until the user acts.
 func (s *Secret) RunContext(ctx context.Context) (*Result, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	type response struct {
 		val []byte
 		err error
@@ -86,7 +89,11 @@ func (s *Secret) RunContext(ctx context.Context) (*Result, error) {
 	ch := make(chan response, 1)
 	go func() {
 		val, err := s.run()
-		ch <- response{val, err}
+		select {
+		case <-ctx.Done():
+			zero.Bytes(val)
+		case ch <- response{val, err}:
+		}
 	}()
 	select {
 	case <-ctx.Done():
@@ -201,44 +208,36 @@ func (s *Secret) readValue(ctx Context) ([]byte, error) {
 	return s.readFromReader(ctx)
 }
 
-// readFromReader reads one line byte-by-byte to avoid bufio pre-fetching consuming
-// bytes that belong to subsequent reads (e.g. the confirmation prompt).
-// Each staging byte is zeroed immediately after use.
+// readFromReader reads one line using a fixed-max buffer to bound allocation and avoid
+// heap growth side-channels. The staging buffer is zeroed before return.
 func (s *Secret) readFromReader(ctx Context) ([]byte, error) {
 	fmt.Fprint(os.Stderr, s.opts.Formatter(ctx))
 
-	result := make([]byte, 0, 64)
-	oneByte := make([]byte, 1)
+	buf := make([]byte, maxSecretLineLength)
+	n := 0
 
-	for {
-		_, err := s.input.Read(oneByte)
+	for n < maxSecretLineLength {
+		_, err := s.input.Read(buf[n : n+1])
 		if err != nil {
-			if err == io.EOF {
-				if len(result) > 0 {
-					break
-				}
-				zero.Bytes(result)
-				return nil, io.EOF
+			if err == io.EOF && n > 0 {
+				break
 			}
-			zero.Bytes(result)
+			zero.Bytes(buf)
 			return nil, err
 		}
-		b := oneByte[0]
-		oneByte[0] = 0
-
-		if b == '\n' {
+		if buf[n] == '\n' {
 			break
 		}
-		if b == '\r' {
+		if buf[n] == '\r' {
+			buf[n] = 0
 			continue
 		}
-		if len(result) >= maxSecretLineLength {
-			zero.Bytes(result)
-			return nil, ErrValidation{Msg: "input too long"}
-		}
-		result = append(result, b)
+		n++
 	}
 
+	result := make([]byte, n)
+	copy(result, buf[:n])
+	zero.Bytes(buf)
 	return result, nil
 }
 
